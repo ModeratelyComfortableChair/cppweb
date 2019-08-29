@@ -20,6 +20,7 @@ using bsoncxx::builder::stream::document;
 using bsoncxx::builder::stream::finalize;
 using bsoncxx::builder::stream::open_array;
 using bsoncxx::builder::stream::open_document;
+using bsoncxx::builder::basic::make_document;
 using bsoncxx::builder::basic::kvp;
 using mongocxx::cursor;
 
@@ -83,7 +84,7 @@ int main(int argc, char* argv[]){
     sendImage(res, filename);
   });
 
-  CROW_ROUTE(app, "/styles/<string>")
+  CROW_ROUTE(app, ".+?/styles/<string>")
   ([](const request &req, response &res, string filename){
     sendStyle(res, filename);
   });
@@ -102,6 +103,14 @@ int main(int argc, char* argv[]){
   ([](const request &req, response &res){
     sendHtml(res, "about");
   });
+
+  CROW_ROUTE(app, "/contact/<string>")
+  ([&collection](string email){
+    auto doc = collection.find_one(make_document(kvp("email", email)));
+    crow::json::wvalue dto;
+    dto["contact"] = json::load(bsoncxx::to_json(doc.value().view()));
+    return getView("contact", dto);
+    });
 
   CROW_ROUTE(app, "/contacts")
   ([&collection](){
