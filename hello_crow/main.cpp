@@ -197,6 +197,26 @@ int main(int argc, char* argv[]){
     getView(res, "contacts", dto);
   });
 
+  CROW_ROUTE(app, "/api/contacts")
+  ([&collection](const request &req){
+    mongocxx::options::find opts;
+    auto skip = req.url_params.get("skip");
+    auto limit = req.url_params.get("limit");
+    opts.skip((skip ? std::atoi(skip) : 0));
+    opts.limit((limit ? std::atoi(limit) : 0));
+    auto docs = collection.find({}, opts);
+    vector<crow::json::rvalue> contacts;
+    contacts.reserve(10);
+
+    for(auto doc : docs){
+      contacts.push_back(json::load(bsoncxx::to_json(doc)));
+    }
+
+    crow::json::wvalue dto;
+    dto["contacts"] = contacts;
+    return crow::response{dto};
+  });
+
   char* port = getenv("PORT");
   uint16_t iPort = static_cast<uint16_t>(port != NULL? stoi(port) : DEFAULT_PORT);
   cout << "PORT = " << iPort << "\n";
