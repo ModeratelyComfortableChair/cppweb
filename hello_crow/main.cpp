@@ -29,8 +29,11 @@ using namespace std;
 using namespace crow;
 using namespace crow::mustache;
 
-string getView(const string &filename, context &x){
-  return load("../public/" + filename + ".html").render(x);
+void getView(response &res, const string &filename, context &x){
+  res.set_header("Content-Type", "text/html");
+  auto text = load("../public/" + filename + ".html").render(x);
+  res.write(text);
+  res.end();
 }
 
 const uint16_t DEFAULT_PORT = 8080;
@@ -66,6 +69,11 @@ void sendScript(response &res, string filename){
   sendFile(res, "scripts/"+ filename, "text/javascript");
 }
 
+void notFound(response &res, const string &message){
+  res.code = 404;
+  res.write(message +": Not Found");
+  res.end();
+}
 
 int main(int argc, char* argv[]){
 
@@ -84,7 +92,7 @@ int main(int argc, char* argv[]){
     sendImage(res, filename);
   });
 
-  CROW_ROUTE(app, ".+?/styles/<string>")
+  CROW_ROUTE(app, "/styles/<string>")
   ([](const request &req, response &res, string filename){
     sendStyle(res, filename);
   });
@@ -92,6 +100,46 @@ int main(int argc, char* argv[]){
   CROW_ROUTE(app, "/scripts/<string>")
   ([](const request &req, response &res, string filename){
     sendScript(res, filename);
+  });
+
+  CROW_ROUTE(app, "/add/<int>/<int>")
+  ([](const request &req, response &res, int a, int b){
+    res.set_header("Content-Type", "text/plain");
+    ostringstream os;
+    os << "Integer: " << a << " + " << b << " = " << a + b << "\n";
+    res.write(os.str());
+    res.end();
+  });
+
+  CROW_ROUTE(app, "/add/<double>/<double>")
+  ([](const request &req, response &res, double a, double b){
+    res.set_header("Content-Type", "text/plain");
+    ostringstream os;
+    os << "Double: " << a << " + " << b << " = " << a + b << "\n";
+    res.write(os.str());
+    res.end();
+  });
+
+  //keep string lasts
+  CROW_ROUTE(app, "/add/<string>/<string>")
+  ([](const request &req, response &res, string a, string b){
+    res.set_header("Content-Type", "text/plain");
+    ostringstream os;
+    os << "String: " << a << " + " << b << " = " << a + b << "\n";
+    res.write(os.str());
+    res.end();
+  });
+
+  CROW_ROUTE(app, "/query")
+  ([](const request &req, response &res){
+    auto firstname = req.url_params.get("firstname");
+    auto lastname = req.url_params.get("lastname");
+    ostringstream os;
+    os << "Hello " << (firstname? firstname: "") <<
+    " " << (lastname? lastname: "") << endl;
+    res.set_header("Content-Type", "text/plain");
+    res.write(os.str());
+    res.end();
   });
 
   CROW_ROUTE(app, "/rest_test").methods(HTTPMethod::Post, HTTPMethod::Get, HTTPMethod::Put)
@@ -113,15 +161,28 @@ int main(int argc, char* argv[]){
   });
 
   CROW_ROUTE(app, "/contact/<string>")
-  ([&collection](string email){
+  ([&collection](const request &req, response &res, string email){
     auto doc = collection.find_one(make_document(kvp("email", email)));
     crow::json::wvalue dto;
     dto["contact"] = json::load(bsoncxx::to_json(doc.value().view()));
-    return getView("contact", dto);
+    getView(res, "contact", dto);
+  });
+
+  CROW_ROUTE(app, "/contact/<string>/<string>")
+  ([&collection](const request &req, response &res, string firstname, string lastname){
+    auto doc = collection.find_one(
+      make_document(kvp("firstName", firstname), kvp("lastName", lastname)));
+    if(!doc){
+      return notFound(res, "Contact");
+    }
+    
+    crow::json::wvalue dto;
+    dto["contact"] = json::load(bsoncxx::to_json(doc.value().view()));
+    getView(res, "contact", dto);
   });
 
   CROW_ROUTE(app, "/contacts")
-  ([&collection](){
+  ([&collection](const request &req, response &res){
     mongocxx::options::find opts;
     opts.limit(10);
     auto docs = collection.find({}, opts);
@@ -129,12 +190,11 @@ int main(int argc, char* argv[]){
     vector<crow::json::rvalue> contacts;
     contacts.reserve(10);
 
-
     for(auto doc : docs){
       contacts.push_back(json::load(bsoncxx::to_json(doc)));
     }
     dto["contacts"] = contacts;
-    return getView("contacts", dto);
+    getView(res, "contacts", dto);
   });
 
   char* port = getenv("PORT");
