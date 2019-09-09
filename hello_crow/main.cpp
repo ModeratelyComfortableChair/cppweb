@@ -4,6 +4,9 @@
 #include <vector>
 #include <cstdlib>
 #include <boost/filesystem.hpp>
+#include <unordered_set>
+#include <mutex>
+#include <string>
 
 #include <bsoncxx/builder/stream/document.hpp>
 #include <bsoncxx/json.hpp>
@@ -24,7 +27,6 @@ using bsoncxx::builder::basic::make_document;
 using bsoncxx::builder::basic::kvp;
 using mongocxx::cursor;
 
-
 using namespace std;
 using namespace crow;
 using namespace crow::mustache;
@@ -37,6 +39,7 @@ void getView(response &res, const string &filename, context &x){
 }
 
 const uint16_t DEFAULT_PORT = 8080;
+const string DEFAULT_MONGODB_URI_GUEST = "mongodb+srv://guest:DxLB2kd6cnB1@cpp-api-tutorial-l3zax.mongodb.net";
 
 void sendFile(response &res, string filename, string contentType){
   ifstream in("../public/" + filename, ifstream::in);
@@ -77,15 +80,51 @@ void notFound(response &res, const string &message){
 
 int main(int argc, char* argv[]){
 
+  std::mutex mtx;
+  std::unordered_set<crow::websocket::connection *> users;
+
   crow::SimpleApp app;
 
   //need this for mustache to work
   set_base(".");
 
   mongocxx::instance inst{};
-  string mongoConnect = std::string(getenv("MONGODB_URI"));
+  string mongoConnect;
+  mongoConnect = std::string(getenv("MONGODB_URI"));
+
+  /*try{
+    mongoConnect = std::string(getenv("MONGODB_URI"));
+  } catch (const std::exception& e){
+    mongoConnect =  DEFAULT_MONGODB_URI_GUEST;
+  }*/
   mongocxx::client conn{mongocxx::uri{mongoConnect}};
   auto collection = conn["cpp-api-tutorial"]["contacts"];
+
+  CROW_ROUTE(app, "/ws")
+    .websocket()
+    .onopen([&](crow::websocket::connection & conn){
+      std::lock_guard<std::mutex>_(mtx);
+      users.insert(&conn);
+    })
+    .onclose([&](crow::websocket::connection & conn, const string &reason){
+      std::lock_guard<std::mutex>_(mtx);
+      users.erase(&conn);
+    })
+    .onmessage([&](crow::websocket::connection &/*conn*/, const string &data, bool is_binary){
+      std::lock_guard<std::mutex>_(mtx);
+      for(auto user : users){
+        if(is_binary){
+          user->send_binary(data);
+        } else {
+          user->send_text(data);
+        }
+      }
+    });
+
+  CROW_ROUTE(app, "/chat")
+  ([](const request &req, response &res){
+    sendHtml(res, "chat");
+  });
 
   CROW_ROUTE(app, "/images/<string>")
   ([](const request &req, response &res, string filename){
